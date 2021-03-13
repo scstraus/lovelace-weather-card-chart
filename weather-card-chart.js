@@ -118,6 +118,7 @@ class WeatherCardChart extends Polymer.Element {
         .main ha-icon {
           --iron-icon-height: 74px;
           --iron-icon-width: 74px;
+          --mdc-icon-size: 74px;
           margin-right: 20px;
         }
         .main div {
@@ -167,11 +168,17 @@ class WeatherCardChart extends Polymer.Element {
               </template>
             </div>
             <div>
-              <ha-icon icon="hass:[[getWindDirIcon(windBearing)]]"></ha-icon> [[getWindDir(windBearing)]]<br>
-              <ha-icon icon="hass:weather-windy"></ha-icon> [[computeWind(weatherObj.attributes.wind_speed)]] [[ll('uSpeed')]]
+              <ha-icon icon="[[getWindDirIcon(windBearing)]]"></ha-icon> [[getWindDir(windBearing)]]<br>
+              <ha-icon icon="hass:weather-windy"></ha-icon>
+              <template is="dom-if" if="[[windObj]]">
+                [[roundNumber(windObj.state)]] [[ll('uSpeed')]]                
+              </template>
+              <template is="dom-if" if="[[!windObj]]">
+                [[computeWind(weatherObj.attributes.wind_speed)]] [[ll('uSpeed')]]
+              </template>
             </div>
           </div>
-          <ha-chart-base data="[[ChartData]]"></ha-chart-base>
+          <ha-chart-base hass="[[_hass]]" data="[[ChartData]]"></ha-chart-base>
           <div class="conditions">
             <template is="dom-repeat" items="[[forecast]]">
               <div>
@@ -189,6 +196,7 @@ class WeatherCardChart extends Polymer.Element {
       config: Object,
       sunObj: Object,
       tempObj: Object,
+      windObj: Object,
       mode: String,
       weatherObj: {
         type: Object,
@@ -228,6 +236,7 @@ class WeatherCardChart extends Polymer.Element {
     this.title = config.title;
     this.weatherObj = config.weather;
     this.tempObj = config.temp;
+    this.windObj = config.wind;
     this.mode = config.mode;
     if (!config.weather) {
       throw new Error('Please define "weather" entity in the card config');
@@ -240,8 +249,17 @@ class WeatherCardChart extends Polymer.Element {
     this.weatherObj = this.config.weather in hass.states ? hass.states[this.config.weather] : null;
     this.sunObj = 'sun.sun' in hass.states ? hass.states['sun.sun'] : null;
     this.tempObj = this.config.temp in hass.states ? hass.states[this.config.temp] : null;
-    this.forecast = this.weatherObj.attributes.forecast.slice(0,9);
+    this.windObj = this.config.wind in hass.states ? hass.states[this.config.wind] : null;
     this.windBearing = this.weatherObj.attributes.wind_bearing;
+    var mode = this.config.mode;
+    if (mode == 'hourly')  {
+    this.forecast = this.weatherObj.attributes.forecast.slice(0,27).filter(function(value, index, Arr) {
+        return index % 3 == 1;
+        }); 
+    }
+    else {
+      this.forecast = this.weatherObj.attributes.forecast.slice(0,9);
+    } 
   }
 
   dataChanged() {
@@ -267,7 +285,10 @@ class WeatherCardChart extends Polymer.Element {
   }
 
   computeWind(speed) {
-    var calcSpeed = Math.round(speed * 1000 / 3600);
+//Unneeded as my wind is already in m/s so I'm commenting out
+//    var calcSpeed = Math.round(speed * 1000 / 3600);
+    var calcSpeed = speed;
+
     return calcSpeed;
   }
 
@@ -294,20 +315,32 @@ class WeatherCardChart extends Polymer.Element {
   }
 
   drawChart() {
-    var data = this.weatherObj.attributes.forecast.slice(0,9);
+    //var data = this.weatherObj.attributes.forecast.slice(0,9);
+    if (!this.weatherObj.attributes || !this.weatherObj.attributes.forecast) {
+      return [];
+    }
+    var mode = this.mode;
+    var data = null;
+    console.log ("mode=",mode);
+    if (mode == 'hourly') {
+      data = this.weatherObj.attributes.forecast.slice(0,27);
+    } else {
+      data = this.weatherObj.attributes.forecast.slice(0,9);
+    }
     var locale = this._hass.selectedLanguage || this._hass.language;
     var tempUnit = this._hass.config.unit_system.temperature;
     var lengthUnit = this._hass.config.unit_system.length;
     var precipUnit = lengthUnit === 'km' ? this.ll('uPrecip') : 'in';
-    var mode = this.mode;
+//    var mode = this.mode;
     var i;
-    if (!this.weatherObj.attributes.forecast) {
-      return [];
-    }
+//    if (!this.weatherObj.attributes.forecast) {
+//      return [];
+//    }
     var dateTime = [];
     var tempHigh = [];
     var tempLow = [];
     var precip = [];
+    /*
     for (i = 0; i < data.length; i++) {
       var d = data[i];
       dateTime.push(new Date(d.datetime));
@@ -315,6 +348,62 @@ class WeatherCardChart extends Polymer.Element {
       tempLow.push(d.templow);
       precip.push(d.precipitation);
     }
+    */
+    if (mode == 'hourly') {
+      data = this.weatherObj.attributes.forecast.slice(0,27);
+    } else {
+      data = this.weatherObj.attributes.forecast.slice(0,9);
+    }
+    var averagecount = 1;
+    var dateTimeAvg = null;
+    var tempHighAvg = null;
+    var tempLowAvg = null;
+    var precipAvg = null;
+    for (i = 0; i < data.length; i++) {
+      var d = data[i];
+      if (mode == 'hourly') {
+        tempHighAvg += d.temperature;
+        tempLowAvg += d.templow;
+        precipAvg += d.precipitation;
+        if (averagecount == 2) {
+          dateTime.push(new Date(d.datetime));
+          }
+        if (averagecount == 3) {
+          if (precipAvg<=0) {
+            precipAvg=null;
+            }
+          tempHighAvg/=3;
+          tempHigh.push(tempHighAvg);
+          precip.push(precipAvg);
+//          console.log ("i=",i);
+//          console.log ("averagecount=",averagecount);
+//          console.log ("d=",d);
+//          console.log ("tempHighAvg=",tempHighAvg);
+//          console.log ("precipAvg=",precipAvg);
+//          console.log ("tempLowAvg=",tempLowAvg);
+//          console.log ("dateTimeAvg=",dateTimeAvg);
+          averagecount = 0;
+          dateTimeAvg = null;
+          tempLowAvg = null;
+          tempHighAvg = null;
+          precipAvg = null;
+          }
+//        console.log ("i=",i);
+//        console.log ("averagecount=",averagecount);
+//        console.log ("d=",d);
+//        console.log ("tempHighAvg=",tempHighAvg);
+//        console.log ("precipAvg=",precipAvg);
+//        console.log ("tempLowAvg=",tempLowAvg);
+//        console.log ("dateTimeAvg=",dateTimeAvg);
+        averagecount += 1;
+        }
+      else {
+        dateTime.push(new Date(d.datetime));
+        tempHigh.push(d.temperature);
+        tempLow.push(d.templow);
+        precip.push(d.precipitation);
+        } 
+      }
     var style = getComputedStyle(document.body);
     var textColor = style.getPropertyValue('--primary-text-color');
     var dividerColor = style.getPropertyValue('--divider-color');
@@ -429,7 +518,7 @@ class WeatherCardChart extends Polymer.Element {
               fontColor: textColor,
             },
             afterFit: function(scaleInstance) {
-              scaleInstance.width = 28;
+              scaleInstance.width = 35;
             },
           },
           {
